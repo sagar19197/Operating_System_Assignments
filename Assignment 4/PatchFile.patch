@@ -1,0 +1,80 @@
+diff -r linux-5.14.3/arch/x86/entry/syscalls/syscall_64.tbl linux-5.14.3-MODIFY/arch/x86/entry/syscalls/syscall_64.tbl
+371a372,373
+> 448	common	reader	sys_reader
+> 449	common	writer	sys_writer
+diff -r linux-5.14.3/kernel/sys.c linux-5.14.3-MODIFY/kernel/sys.c
+134a135,208
+> //----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+> 
+> // OS Assingment 4  - Sagar, 2019197
+> 
+> #include <linux/slab.h>
+> #include <asm/uaccess.h>
+> 
+> static int my_initial = 0; //will check if initialization is done
+> static int in_counter, out_counter;
+> static long *my_buffer; //for buffer
+> 
+> static DEFINE_SEMAPHORE(mutex);
+> static DEFINE_SEMAPHORE(remaining_space); // for number of remaining items
+> static DEFINE_SEMAPHORE(filled_space); // for number of filled items
+> 
+> static void my_initialization(void){
+> 	sema_init(&mutex, 1); //initializing semaphores
+> 	sema_init(&remaining_space, 10);
+> 	sema_init(&filled_space, 0);
+> 							//kmalloc
+> 	my_buffer = kmalloc(sizeof(long) * 10 , GFP_KERNEL); //created queue for 10 blocks with each block of 8 bytes
+> 	in_counter = 0;
+> 	out_counter = 0;
+> 	my_initial = 1; // no more initialization
+> }
+> 
+> SYSCALL_DEFINE1(writer , long *, buf){ //writer system call
+> 
+> if(my_initial != 0){ 	//doing initialization if not done earlier
+> 	my_initialization();
+> }
+> 
+> if(! (down_interruptible(&remaining_space))){ //to avoid busy waiting
+> 	if(! (down_interruptible(&mutex))){
+> 		// copy_from_user
+> 		if(copy_from_user(my_buffer + (in_counter * sizeof(long)), buf, sizeof(long)) != 0){
+> 			printk(" Kernel copy failed !!\n");
+> 			return -1;
+> 		}
+> 
+> 		in_counter = (in_counter+1) % 10; //incrementing in a circular way
+> 
+> 		up(&mutex);
+> 		up(&filled_space); //increment filled items
+> }
+> }
+> 	return 0;
+> }
+> 
+> SYSCALL_DEFINE1(reader , long *, buf){ // reader system call
+> 
+> if(my_initial != 0){ //doing initialization if not done earlier
+> 	my_initialization();
+> }
+> 
+> if(! (down_interruptible(&filled_space))){ //to avoid busy waiting
+> 	if(! (down_interruptible(&mutex))){
+> 				// copy_to_user
+> 	if(copy_to_user(buf, my_buffer + (out_counter * sizeof(long)) , sizeof(long)) != 0){
+> 		printk(" Kernel copy failed !!\n");
+> 		return -1;
+> 	}
+> 	
+> 	out_counter = (out_counter+1) % 10; //incrementing in a circular way
+> 
+> 	up(&mutex);
+> 	up(&remaining_space); //increment remaining items
+> }
+> }
+> 	return 0;
+> }
+> 
+> //-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+> 
